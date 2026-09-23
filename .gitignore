@@ -1,0 +1,24 @@
+# Survey data and locally uploaded files — never commit respondent-level data.
+*.csv
+*.xlsx
+*.xls
+*.sav
+*.dta
+
+# Build archives and local outputs.
+*.zip
+outputs/
+
+# R and RStudio session files.
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Locally restored package libraries.
+renv/library/
+renv/staging/
+
+# Operating-system files.
+.DS_Store
+Thumbs.db

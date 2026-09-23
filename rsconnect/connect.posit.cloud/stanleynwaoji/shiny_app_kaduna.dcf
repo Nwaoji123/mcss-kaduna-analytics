@@ -1,0 +1,12 @@
+name: shiny_app_kaduna
+title: Shiny app Kaduna
+username: stanleynwaoji
+account: stanleynwaoji
+server: connect.posit.cloud
+hostUrl: https://api.connect.posit.cloud/v1
+appId: 01a07c5e-a1b6-137f-a0f7-4d7422f04d92
+bundleId:
+url: https://connect.posit.cloud/stanleynwaoji/content/01a07c5e-a1b6-137f-a0f7-4d7422f04d92
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
