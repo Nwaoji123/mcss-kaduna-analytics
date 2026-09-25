@@ -18,10 +18,7 @@ stacked_eligible_indicators <- c(
   "net_source"
 )
 
-concern_indicators <- c("child_fever","confirmed_malaria","net_nonuse_reasons")
-
-positive_map_cols <- c(Low="#CDEDE5",Medium="#62BEAA",High="#178F7A","No data"="#DCE5E8")
-concern_map_cols <- c(Low="#FAD9C1",Medium="#F28E2B",High="#C0392B","No data"="#D9DEE3")
+map_class_cols <- c(Low="#D73027",Medium="#F6C945",High="#1A9850","No data"="#D9DEE3")
 chart_palette <- c("#178F7A","#4D82C4","#D99A2B","#D96861","#8272B7","#87949A")
 
 map_lga_key <- function(x) {
@@ -50,6 +47,28 @@ read_lga_boundaries <- function(path) {
   shp <- shp[tolower(trimws(shp$statename))=="kaduna",,drop=FALSE]
   shp$join_lga <- map_lga_key(shp$lganame)
   shp
+}
+
+make_lga_map_plot <- function(shp,title,is_mean=FALSE) {
+  subtitle <- if (is_mean) {
+    "LGA weighted means classified into tertiles"
+  } else {
+    "LGA estimates: Low 0–39.9%, Medium 40–69.9%, High 70–100%"
+  }
+  ggplot(shp) +
+    geom_sf(aes(fill=MapClass),color="#6F7D83",linewidth=.3) +
+    scale_fill_manual(values=map_class_cols,drop=FALSE,name="Map class") +
+    coord_sf(expand=FALSE) +
+    labs(title=title,subtitle=subtitle,caption="LGA boundaries: bundled Nigeria LGA GeoJSON") +
+    theme_minimal(base_size=12) +
+    theme(
+      axis.title=element_blank(),axis.text=element_blank(),axis.ticks=element_blank(),
+      panel.grid=element_blank(),panel.background=element_rect(fill="#F8FAFA",color=NA),
+      plot.title=element_text(face="bold",color="#2D3A3F"),
+      plot.subtitle=element_text(color="#4B5B62"),
+      legend.position="bottom",legend.title=element_text(face="bold"),
+      plot.caption=element_text(color="#6F7D83",hjust=0)
+    )
 }
 
 make_indicator_plot <- function(x,title,group,indicator) {
@@ -213,6 +232,9 @@ ui <- fluidPage(
    .nav-tabs .nav-link:hover,.nav-tabs>li>a:hover{background:transparent;color:#178F7A;border-bottom-color:#A8D9CE}
    .nav-tabs .nav-link.active,.nav-tabs>li.active>a,.nav-tabs>li.active>a:focus,.nav-tabs>li.active>a:hover{background:transparent;color:#178F7A;border-bottom-color:#178F7A;box-shadow:none}
    .tab-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+   .map-download-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:10px 0 12px;padding:11px 14px;background:#F4F7F8;border:1px solid #DCE5E8;border-radius:10px}
+   .map-download-bar strong{display:block;color:#2D3A3F;font-size:13px}.map-download-bar span{color:#6F7D83;font-size:12px}
+   .map-download-actions{display:flex;gap:8px;flex-wrap:wrap}.map-download-actions .btn{white-space:nowrap}
    .title{color:#2D3A3F;font-size:21px;font-weight:600;margin-top:0}
    .help-note{background:#F4F7F8;border-left:4px solid #178F7A;border-radius:8px;padding:12px 14px;color:#4B5B62}
    .footer-note{text-align:right;color:#6F7D83;font-size:12px;margin:4px 0 0}
@@ -402,7 +424,7 @@ ui <- fluidPage(
       )
      )
     ),
-    tags$div(class="footer-note","MCSS Analytical Tool | Current-round indicators | Version 47")
+    tags$div(class="footer-note","MCSS Analytical Tool | Current-round indicators | Version 48")
    ),
    tags$footer(class="app-footer",tags$span("Powered by"),tags$strong("SCIDaR"))
   )
@@ -486,6 +508,21 @@ server <- function(input,output,session){
    choice <- if(length(opts)>1 && !is.null(input$map_result)) input$map_result else opts[1]
    d[d$Result==choice,,drop=FALSE]
  })
+ map_shape_data<-reactive({
+   validate(need(input$group=="lga","Select lga as the disaggregation to view the map."))
+   shp <- lga_shapes(); d <- map_choice_data()
+   d$join_lga <- map_lga_key(d$Group)
+   m <- match(shp$join_lga,d$join_lga)
+   shp$Estimate <- d$Estimate[m]
+   shp$Mapped_Result <- d$Result[m]
+   is_mean <- any(d$Result=="Weighted mean")
+   shp$MapClass <- classify_map_values(shp$Estimate,is_mean=is_mean)
+   list(
+     shp=shp,
+     is_mean=is_mean,
+     title=indicator_catalog$label[match(input$indicator,indicator_catalog$id)]
+   )
+ })
  output$status<-renderUI({d<-prepared();src<-selected_source_module();div(class="alert alert-success",sprintf("Loaded %s records and %s variables from the %s file for this indicator.",format(nrow(d),big.mark=","),ncol(d),src))})
  output$context_strip<-renderUI({
    d<-prepared(); src<-selected_source_module(); label<-indicator_catalog$label[match(input$indicator,indicator_catalog$id)]
@@ -505,30 +542,30 @@ server <- function(input,output,session){
    opts <- unique(as.character(d$Result))
    tagList(
      if(length(opts)>1) selectInput("map_result","Map option/category",choices=opts,selected=opts[1]),
-     tags$div(class="help-note","Map classes: Low 0–39.9%, Medium 40–69.9%, High 70–100%. Mean indicators use Low/Medium/High tertiles across LGAs. Grey means no data or unmatched LGA.")
+     tags$div(class="map-download-bar",
+       tags$div(tags$strong("Download this map"),tags$span("Export a clean PNG image or PDF without a web-map background.")),
+       tags$div(class="map-download-actions",
+         downloadButton("download_map_png","Download PNG",class="btn-primary"),
+         downloadButton("download_map_pdf","Download PDF",class="btn-outline-secondary")
+       )
+     ),
+     tags$div(class="help-note","Map classes: Low (red) 0–39.9%, Medium (yellow) 40–69.9%, High (green) 70–100%. Mean indicators use Low/Medium/High tertiles across LGAs. Grey means no data or unmatched LGA.")
    )
  })
  output$map<-renderLeaflet({
    validate(need(input$group=="lga","Select lga as the disaggregation to view the map."))
-   shp <- lga_shapes(); d <- map_choice_data()
-   d$join_lga <- map_lga_key(d$Group)
-   m <- match(shp$join_lga,d$join_lga)
-   shp$Estimate <- d$Estimate[m]
-   shp$Mapped_Result <- d$Result[m]
-   is_mean <- any(d$Result=="Weighted mean")
-   shp$MapClass <- classify_map_values(shp$Estimate,is_mean=is_mean)
-   cols <- if(input$indicator %in% concern_indicators) concern_map_cols else positive_map_cols
-   pal <- leaflet::colorFactor(palette=unname(cols),domain=names(cols),na.color=cols[["No data"]])
-   suffix <- if(is_mean) "" else "%"
+   x <- map_shape_data(); shp <- x$shp
+   pal <- leaflet::colorFactor(palette=unname(map_class_cols),domain=names(map_class_cols),na.color=map_class_cols[["No data"]])
+   suffix <- if(x$is_mean) "" else "%"
    lbl <- paste0("<strong>",shp$lganame,"</strong><br/>",
      ifelse(is.na(shp$Estimate),"No data",paste0(round(shp$Estimate,1),suffix," — ",as.character(shp$MapClass))))
    leaflet(shp) %>%
-     addProviderTiles(providers$CartoDB.Positron) %>%
+     addTiles(attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors") %>%
      addPolygons(fillColor=~pal(MapClass),fillOpacity=.85,color="#6F7D83",weight=1,opacity=.8,
        label=lapply(lbl,htmltools::HTML),
        popup=lapply(lbl,htmltools::HTML),
        highlightOptions=highlightOptions(weight=3,color="#2D3A3F",bringToFront=TRUE)) %>%
-     addLegend(position="bottomright",colors=unname(cols),labels=names(cols),title="Map class",opacity=.9)
+     addLegend(position="bottomright",colors=unname(map_class_cols),labels=names(map_class_cols),title="Map class",opacity=.9)
  })
  output$catalogue<-renderDT({x<-indicator_catalog[,c("module","source_module","id","label")];x$module<-module_labels[x$module];names(x)<-c("Thematic area","Source file","Indicator ID","Indicator");datatable(x,rownames=FALSE,options=list(pageLength=12,scrollX=TRUE),class="compact stripe hover")})
  output$dictionary_note<-renderUI({
@@ -538,5 +575,13 @@ server <- function(input,output,session){
  output$dictionary<-renderDT({req(input$questionnaire);d<-readxl::read_excel(input$questionnaire$datapath,sheet="survey");names(d)<-clean_names(names(d));keep<-intersect(c("type","name","label_english_en","label_hausa_ha","relevant","required"),names(d));datatable(head(d[,keep,drop=FALSE],500),rownames=FALSE,options=list(pageLength=12,scrollX=TRUE),class="compact stripe hover")})
  output$download<-downloadHandler(filename=function()paste0(input$indicator,"_by_",input$group,".csv"),content=function(f)write.csv(result(),f,row.names=FALSE,na=""))
  output$download_chart<-downloadHandler(filename=function()paste0(input$indicator,"_by_",input$group,".png"),content=function(f)ggsave(f,plot=make_indicator_plot(chart_data(),indicator_catalog$label[match(input$indicator,indicator_catalog$id)],input$group,input$indicator),width=11,height=7,dpi=150))
+ output$download_map_png<-downloadHandler(
+   filename=function()paste0("kaduna_",input$indicator,"_lga_map.png"),
+   content=function(f){x<-map_shape_data();ggsave(f,plot=make_lga_map_plot(x$shp,x$title,x$is_mean),width=10,height=8,units="in",dpi=300)}
+ )
+ output$download_map_pdf<-downloadHandler(
+   filename=function()paste0("kaduna_",input$indicator,"_lga_map.pdf"),
+   content=function(f){x<-map_shape_data();ggsave(f,plot=make_lga_map_plot(x$shp,x$title,x$is_mean),width=10,height=8,units="in",device=grDevices::pdf)}
+ )
 }
 shinyApp(ui,server)

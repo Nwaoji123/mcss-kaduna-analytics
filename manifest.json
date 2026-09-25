@@ -2729,7 +2729,7 @@
       "checksum": "dfc69559a11b5d9631205e33cc7ac8ca"
     },
     "app.R": {
-      "checksum": "fda5413eb4d08d93f96341309b9582a1"
+      "checksum": "369ccc69689d049e481020ca5f40da0d"
     },
     "data/NGA_LGA_Boundaries.geojson": {
       "checksum": "b87b02889cceb39b2604ca0f8ce5b8e7"
@@ -2738,7 +2738,7 @@
       "checksum": "edfb1dd2c76884be5bb1227314f2701e"
     },
     "README.md": {
-      "checksum": "fdba169b98b4908f09f63da3a1e7502a"
+      "checksum": "924587ad3e8cab645881f6fa5ddd375f"
     },
     "run_tool.R": {
       "checksum": "1b1f1331381a29ac83f7db6186e735b3"

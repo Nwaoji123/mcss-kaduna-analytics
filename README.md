@@ -1,6 +1,6 @@
 # MCSS Survey Analytical Tool
 
-Current build: Version 47.
+Current build: Version 48.
 
 This Shiny application analyzes the shared current-round MCSS files:
 
@@ -17,7 +17,7 @@ Across all indicator groups, tables with multiple response options or categories
 
 The app uses a polished native Shiny/Bslib interface with a collapsible vertical left control drawer for file upload, data files, thematic area, indicator, and disaggregation controls. The main canvas remains wide for results, with sticky output navigation, compact indicator context chips, searchable/sortable result tables, and chart/map views. The Chart tab automatically creates a visual for the selected indicator and disaggregation. It uses pie/donut-style charts only for small overall mutually exclusive categorical distributions; eligible mutually exclusive categorical indicators with disaggregation cuts use 100% stacked bars. Multiple-response indicators use grouped or faceted bars because their options can sum to more than 100%. All pies and bars are labelled with their values, and charts can be downloaded as PNG files. Chart subtitles are intentionally suppressed for a cleaner presentation view.
 
-The Map view uses Kaduna LGA boundaries from the bundled Nigeria LGA GeoJSON file. It works when `lga` is selected as the disaggregation. For multi-option or categorical indicators, choose the option/category to map. Percentage indicators use Low `0–39.9%`, Medium `40–69.9%`, and High `70–100%`; mean indicators use Low/Medium/High tertiles across LGAs. Positive indicators use teal colours, concern/risk indicators use orange-red colours, and no-data/unmatched LGAs are grey.
+The Map view uses Kaduna LGA boundaries from the bundled Nigeria LGA GeoJSON file and a key-free OpenStreetMap background. It works when `lga` is selected as the disaggregation. For multi-option or categorical indicators, choose the option/category to map. Percentage indicators use Low `0–39.9%` (red), Medium `40–69.9%` (yellow), and High `70–100%` (green); mean indicators use Low/Medium/High tertiles across LGAs. No-data/unmatched LGAs are grey. The selected LGA map can be exported as a clean PNG image or PDF without a web-map background.
 
 The app automatically derives the household wealth index from the housing, water, sanitation, livestock and asset variables using principal component analysis. It creates five wealth quintiles and joins them to the members, women and children files by `hhid`, enabling wealth-quintile disaggregation across the analysis.
 
