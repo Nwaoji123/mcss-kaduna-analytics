@@ -53,10 +53,27 @@ make_lga_map_plot <- function(shp,title,is_mean=FALSE) {
   subtitle <- if (is_mean) {
     "LGA weighted means classified into tertiles"
   } else {
-    "LGA estimates: Low 0–39.9%, Medium 40–69.9%, High 70–100%"
+    "LGA estimates: Low 0-39.9%; Medium 40-69.9%; High 70-100%"
   }
+  # Place labels within polygons so they remain legible for irregular LGA shapes.
+  label_points <- sf::st_transform(shp, 32632)
+  label_points <- sf::st_point_on_surface(label_points)
+  label_points <- sf::st_transform(label_points, 4326)
+  suffix <- if (is_mean) "" else "%"
+  label_points$map_label <- ifelse(
+    is.na(label_points$Estimate),
+    paste(label_points$lganame, "No data", sep = "\n"),
+    paste0(label_points$lganame, "\n", sprintf("%.1f", label_points$Estimate), suffix)
+  )
   ggplot(shp) +
     geom_sf(aes(fill=MapClass),color="#6F7D83",linewidth=.3) +
+    geom_sf_label(
+      data=label_points, aes(label=map_label), inherit.aes=FALSE,
+      size=2.45, fontface="bold", lineheight=.88, color="#1F2D33",
+      fill=scales::alpha("white",.82), linewidth=.15,
+      label.padding=grid::unit(.10,"lines"), label.r=grid::unit(.08,"lines"),
+      show.legend=FALSE
+    ) +
     scale_fill_manual(values=map_class_cols,drop=FALSE,name="Map class") +
     coord_sf(expand=FALSE) +
     labs(title=title,subtitle=subtitle,caption="LGA boundaries: bundled Nigeria LGA GeoJSON") +
@@ -543,7 +560,7 @@ server <- function(input,output,session){
    tagList(
      if(length(opts)>1) selectInput("map_result","Map option/category",choices=opts,selected=opts[1]),
      tags$div(class="map-download-bar",
-       tags$div(tags$strong("Download this map"),tags$span("Export a clean PNG image or PDF without a web-map background.")),
+      tags$div(tags$strong("Download this map"),tags$span("Export a clean PNG image or PDF with LGA names and estimates, without a web-map background.")),
        tags$div(class="map-download-actions",
          downloadButton("download_map_png","Download PNG",class="btn-primary"),
          downloadButton("download_map_pdf","Download PDF",class="btn-outline-secondary")
