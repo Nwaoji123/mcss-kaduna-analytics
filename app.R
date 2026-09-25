@@ -569,16 +569,19 @@ server <- function(input,output,session){
      tags$div(class="help-note","Map classes: Low (red) 0–39.9%, Medium (yellow) 40–69.9%, High (green) 70–100%. Mean indicators use Low/Medium/High tertiles across LGAs. Grey means no data or unmatched LGA.")
    )
  })
- output$map<-renderLeaflet({
+  output$map<-renderLeaflet({
    validate(need(input$group=="lga","Select lga as the disaggregation to view the map."))
    x <- map_shape_data(); shp <- x$shp
-   pal <- leaflet::colorFactor(palette=unname(map_class_cols),domain=names(map_class_cols),na.color=map_class_cols[["No data"]])
+   # Assign named colours directly: leaflet::colorFactor() alphabetises
+   # character classes, which can make it disagree with static map exports.
+   shp$MapFill <- unname(map_class_cols[as.character(shp$MapClass)])
+   shp$MapFill[is.na(shp$MapFill)] <- unname(map_class_cols["No data"])
    suffix <- if(x$is_mean) "" else "%"
    lbl <- paste0("<strong>",shp$lganame,"</strong><br/>",
      ifelse(is.na(shp$Estimate),"No data",paste0(round(shp$Estimate,1),suffix," — ",as.character(shp$MapClass))))
    leaflet(shp) %>%
      addTiles(attribution="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors") %>%
-     addPolygons(fillColor=~pal(MapClass),fillOpacity=.85,color="#6F7D83",weight=1,opacity=.8,
+     addPolygons(fillColor=~MapFill,fillOpacity=.85,color="#6F7D83",weight=1,opacity=.8,
        label=lapply(lbl,htmltools::HTML),
        popup=lapply(lbl,htmltools::HTML),
        highlightOptions=highlightOptions(weight=3,color="#2D3A3F",bringToFront=TRUE)) %>%
