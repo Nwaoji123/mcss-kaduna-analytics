@@ -152,10 +152,93 @@ make_indicator_plot <- function(x,title,group,indicator) {
     theme(plot.title=element_text(face="bold",color="#2D3A3F"),panel.grid.major.y=element_blank())
 }
 
+make_trend_plot <- function(x,title) {
+  if (!nrow(x)) return(ggplot()+theme_void()+labs(title="No comparable results to plot"))
+  x$Estimate <- as.numeric(x$Estimate)
+  x <- x[is.finite(x$Estimate),,drop=FALSE]
+  if (!nrow(x)) return(ggplot()+theme_void()+labs(title="No numeric estimates to plot"))
+  x$Round <- factor(as.character(x$Round),levels=unique(as.character(x$Round)))
+  suffix <- if (all(as.character(x$Result)=="Weighted mean")) "" else "%"
+  x$ValueLabel <- paste0(round(x$Estimate,1),suffix)
+  ggplot(x,aes(x=Round,y=Estimate,group=1))+
+    geom_line(color="#178F7A",linewidth=1.1)+
+    geom_point(color="#178F7A",size=3.3)+
+    geom_text(aes(label=ValueLabel),vjust=-.8,color="#2D3A3F",size=3.8,fontface="bold")+
+    scale_y_continuous(expand=expansion(mult=c(.08,.18)))+
+    labs(title=title,x=NULL,y=if(suffix=="%") "Weighted estimate (%)" else "Weighted mean")+
+    theme_minimal(base_size=12)+
+    theme(plot.title=element_text(face="bold",color="#2D3A3F"),panel.grid.major.x=element_blank())
+}
+
+normalise_unique_key <- function(x) {
+  key <- trimws(as.character(x))
+  key[is.na(key) | key==""] <- NA_character_
+  key
+}
+
+attach_trend_household_weights <- function(datasets) {
+  household <- datasets$household
+  if (is.null(household) || !"key" %in% names(household) || !"weights" %in% names(household)) {
+    stop("The previous-round household file must contain both key and weights.",call.=FALSE)
+  }
+  household$key <- normalise_unique_key(household$key)
+  valid_household_key <- !is.na(household$key)
+  if (!all(valid_household_key)) {
+    stop("The previous-round household file has missing key values, so household weights cannot be joined safely.",call.=FALSE)
+  }
+  if (anyDuplicated(household$key)) {
+    stop("The previous-round household file has duplicate key values, so household weights cannot be joined safely.",call.=FALSE)
+  }
+  household$hhid <- household$key
+  datasets$household <- household
+  missing_key_rows <- integer(3)
+  names(missing_key_rows) <- c("members","children","women")
+  for (source_name in c("members","children","women")) {
+    d <- datasets[[source_name]]
+    if (is.null(d) || !"key" %in% names(d)) {
+      stop(paste0("The previous-round ",source_name," file must contain key to receive the household weight."),call.=FALSE)
+    }
+    d$key <- normalise_unique_key(d$key)
+    matched_household <- match(d$key,household$key)
+    unmatched <- !is.na(d$key) & is.na(matched_household)
+    if (any(unmatched)) {
+      stop(paste0("The previous-round ",source_name," file contains key value(s) that do not match the household file."),call.=FALSE)
+    }
+    missing_key_rows[[source_name]] <- sum(is.na(d$key))
+    d$weights <- household$weights[matched_household]
+    d$hhid <- household$hhid[matched_household]
+    datasets[[source_name]] <- d
+  }
+  attr(datasets,"trend_weight_join") <- list(key="key",missing_key_rows=missing_key_rows)
+  datasets
+}
+
 status_badge <- function(ok,label) {
   cls <- if (isTRUE(ok)) "file-ok" else "file-missing"
   mark <- if (isTRUE(ok)) "OK" else "—"
   tags$div(class=paste("file-pill",cls),tags$span(class="file-mark",mark),label)
+}
+
+trend_input_id <- function(round_id, field) paste0("trend_",field,"_",round_id)
+
+trend_round_card <- function(round_id, position) {
+  tags$div(
+    id=paste0("trend_round_card_",round_id),class="trend-round-card",
+    tags$h4(paste0("Previous round ",position)),
+    tags$p("Provide a clear label, then upload all four source files for this round."),
+    textInput(trend_input_id(round_id,"label"),"Round label",value=paste("Previous round",position)),
+    tags$div(class="trend-upload-grid",
+      fileInput(trend_input_id(round_id,"household"),"Household CSV",accept=".csv"),
+      fileInput(trend_input_id(round_id,"members"),"Members CSV",accept=".csv"),
+      fileInput(trend_input_id(round_id,"children"),"Children CSV",accept=".csv"),
+      fileInput(trend_input_id(round_id,"women"),"Women CSV",accept=".csv")
+    ),
+    tags$div(class="trend-validation-row",
+      tags$small("The household file must contain weights. The shared SurveyCTO key safely supplies those weights to the members, children and women files."),
+      actionButton(trend_input_id(round_id,"validate"),"Validate this round",class="btn-primary")
+    ),
+    uiOutput(trend_input_id(round_id,"status"))
+  )
 }
 
 thematic_card <- function(id,icon,title,description) {
@@ -252,6 +335,19 @@ ui <- fluidPage(
    .map-download-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:10px 0 12px;padding:11px 14px;background:#F4F7F8;border:1px solid #DCE5E8;border-radius:10px}
    .map-download-bar strong{display:block;color:#2D3A3F;font-size:13px}.map-download-bar span{color:#6F7D83;font-size:12px}
    .map-download-actions{display:flex;gap:8px;flex-wrap:wrap}.map-download-actions .btn{white-space:nowrap}
+   .trend-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:18px;background:#EAF6F3;border:1px solid #CBE6DF;border-radius:12px;margin-bottom:14px}
+   .trend-intro h3{margin:0 0 4px;color:#1D4D45;font-size:21px;font-weight:600}.trend-intro p{margin:0;color:#4B5B62;max-width:720px}
+   .trend-round-badge{background:white;border:1px solid #CBE2DC;color:#147A69;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:700;white-space:nowrap}
+   .trend-upload-card,.trend-selection-card,.trend-results-card{border:1px solid #DCE5E8;border-radius:12px;padding:18px;margin-bottom:14px;background:white}
+   .trend-upload-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}.trend-round-stack{display:grid;gap:14px;margin-top:14px}.trend-round-card{border:1px solid #DCE5E8;border-left:4px solid #178F7A;border-radius:10px;padding:16px;background:#FCFDFD}.trend-round-card h4{margin:0 0 5px;color:#2D3A3F;font-size:16px;font-weight:600}.trend-round-card>p{margin:0;color:#6F7D83;font-size:13px}
+   .trend-upload-card h4,.trend-selection-card h4,.trend-results-card h4{margin:0 0 5px;color:#2D3A3F;font-size:17px;font-weight:600}.trend-upload-card p,.trend-selection-card p,.trend-results-card p{margin:0;color:#6F7D83;font-size:13px}
+   .trend-upload-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:15px 0}.trend-upload-grid .shiny-input-container{width:100%;margin:0}.trend-upload-grid label{font-weight:600;color:#2D3A3F;font-size:13px}.trend-upload-grid .form-control{border-radius:8px;border-color:#D1DEE1;font-size:13px}
+   .trend-validation-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid #E7EEF0;padding-top:14px}.trend-validation-row small{color:#6F7D83;max-width:700px}
+   .trend-file-status{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0}.trend-file-chip{border-radius:999px;padding:5px 9px;font-size:12px;font-weight:600;background:#F2F5F6;color:#64757C}.trend-file-chip.ready{background:#E6F4F0;color:#147A69}
+   .trend-selection-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}.trend-selection-grid .shiny-input-container{width:100%;margin:0}.trend-selection-grid label{font-weight:600;color:#2D3A3F;font-size:13px}.trend-selection-grid .form-control,.trend-selection-grid .form-select{border-radius:8px;border-color:#D1DEE1}
+   .trend-chart-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:14px 0}.trend-chart-options .shiny-input-container{width:100%;margin:0}.trend-chart-options label{font-weight:600;color:#2D3A3F;font-size:13px}
+   .trend-status-note{margin-top:12px}.trend-results-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px}.trend-results-actions{display:flex;gap:8px;flex-wrap:wrap}
+   @media(max-width:780px){.trend-upload-grid,.trend-selection-grid,.trend-chart-options{grid-template-columns:1fr}}
    .title{color:#2D3A3F;font-size:21px;font-weight:600;margin-top:0}
    .help-note{background:#F4F7F8;border-left:4px solid #178F7A;border-radius:8px;padding:12px 14px;color:#4B5B62}
    .footer-note{text-align:right;color:#6F7D83;font-size:12px;margin:4px 0 0}
@@ -381,10 +477,10 @@ ui <- fluidPage(
    ),
    tags$main(class="main-canvas",
     tags$div(class="topbar",
-     tags$div(class="topbar-title",tags$h1(class="app-title","MCSS Analytical Tool"),tags$div(class="app-subtitle","Current-round weighted indicators, tables, charts, and LGA maps")),
+     tags$div(class="topbar-title",tags$h1(class="app-title","MCSS Analytical Tool"),tags$div(class="app-subtitle","Current-round weighted indicators, tables, charts, LGA maps, and trends")),
      tags$div(class="topbar-brand",tags$img(src="scidar_logo.png",class="topbar-scidar",alt="SCIDaR"),tags$span(class="topbar-divider",`aria-hidden`="true"),tags$img(src="kaduna_logo.png",class="topbar-state",alt="Kaduna State Government"))
     ),
-    conditionalPanel("input.main_tabs !== 'Overview'",uiOutput("status"),uiOutput("context_strip")),
+    conditionalPanel("input.main_tabs === 'Table' || input.main_tabs === 'Chart' || input.main_tabs === 'Map'",uiOutput("status"),uiOutput("context_strip")),
     tags$div(class="content-card",
      tabsetPanel(
       id="main_tabs",
@@ -394,7 +490,7 @@ ui <- fluidPage(
          tags$div(
           tags$span(class="overview-badge","Kaduna MCSS current survey round"),
           tags$h2("Analyse Kaduna MCSS survey data"),
-          tags$p("Upload your Kaduna survey files, choose an indicator and disaggregation, then review the results as a table, chart or map.")
+          tags$p("Upload your Kaduna survey files, choose an indicator and disaggregation, then review the results as a table, chart, map or multi-round trend.")
          ),
          actionButton("overview_upload",tagList(tags$span(class="overview-action-icon",`aria-hidden`="true","↥"),"Upload survey files"),class="btn-primary",onclick="document.getElementById('mcss_layout').classList.add('sidebar-open'); document.getElementById('upload_details').open=true;")
         ),
@@ -421,6 +517,22 @@ ui <- fluidPage(
       tabPanel("Table",br(),tags$div(class="tab-toolbar",h3(textOutput("result_title"),class="title"),downloadButton("download","Download table",class="btn-primary")),DTOutput("results")),
       tabPanel("Chart",br(),tags$div(class="tab-toolbar",h3("Chart view",class="title"),downloadButton("download_chart","Download chart",class="btn-primary")),plotOutput("chart",height="640px")),
       tabPanel("Map",br(),uiOutput("map_controls"),leafletOutput("map",height="640px")),
+      tabPanel("Trends",br(),
+       tags$div(class="trend-intro",
+        tags$div(tags$h3("Compare survey rounds"),tags$p("Add one or more complete previous Kaduna survey rounds, validate each one, then choose an indicator and available cut to compare across rounds.")),
+        tags$span(class="trend-round-badge","Current-round rural/urban lookup reused")
+       ),
+       tags$div(class="trend-upload-card",
+        tags$div(class="trend-upload-head",
+         tags$div(tags$h4("Step 1. Add and validate previous rounds"),tags$p("Add every previous round you want to compare. Upload the four source files for each round; do not upload the rural/urban classification again.")),
+         actionButton("trend_add_round","Add another previous round",class="btn-primary")
+        ),
+        tags$div(id="trend_rounds_container",class="trend-round-stack"),
+        uiOutput("trend_rounds_summary")
+       ),
+       uiOutput("trend_selection_ui"),
+       uiOutput("trend_results_ui")
+      ),
       tabPanel("Catalogue",br(),DTOutput("catalogue")),
       tabPanel("Help",br(),
        h3("Using the tool",class="title"),
@@ -428,10 +540,10 @@ ui <- fluidPage(
         tags$ol(
          tags$li("Load the four survey CSV files plus the rural/urban classification file."),
          tags$li("Choose a thematic area, indicator, and disaggregation."),
-         tags$li("Review the table, chart, and map, then download outputs as needed.")
+         tags$li("Review the table, chart, map, or add one or more complete previous rounds in Trends to compare across rounds."),
         ),
         p("Estimates use the weights column. Indicators follow the eligibility and derived-variable logic in the supplied R script. Overall, residence, wealth quintile, zone and LGA cuts appear where the source columns are available."),
-        p("Round-one/2025 comparisons are excluded because those source files were not shared.")
+        p("Each previous round must be validated before it is included in a trend. The rural/urban classification file is shared across all selected rounds.")
        ),
        tags$hr(),
        h3("Questionnaire dictionary",class="title"),
@@ -441,7 +553,7 @@ ui <- fluidPage(
       )
      )
     ),
-    tags$div(class="footer-note","MCSS Analytical Tool | Current-round indicators | Version 48")
+    tags$div(class="footer-note","MCSS Analytical Tool | Current-round analysis and trends | Version 52")
    ),
    tags$footer(class="app-footer",tags$span("Powered by"),tags$strong("SCIDaR"))
   )
@@ -450,6 +562,12 @@ ui <- fluidPage(
 
 server <- function(input,output,session){
  raw<-reactiveValues(household=NULL,members=NULL,children=NULL,women=NULL,rural=NULL)
+ trend_sources<-c("household","members","children","women")
+ trend_round_ids<-reactiveVal("round_1")
+ trend_round_counter<-reactiveVal(1L)
+ trend_round_data<-reactiveValues()
+ trend_round_state<-reactiveValues()
+ trend_round_joined<-reactiveValues()
  overview_step<-reactiveVal(1)
  overview_theme<-reactiveVal(NULL)
  observeEvent(input$overview_characteristics,{updateSelectInput(session,"module",selected="characteristics");overview_theme(module_labels[["characteristics"]]);overview_step(2)})
@@ -460,6 +578,122 @@ server <- function(input,output,session){
  observeEvent(input$overview_open_table,updateTabsetPanel(session,"main_tabs",selected="Table"))
  lapply(c("household","members","children","women","rural"),function(nm) observeEvent(input[[nm]],{raw[[nm]]<-read_csv_clean(input[[nm]]$datapath)}))
  core_loaded<-reactive(sum(vapply(c("household","members","children","women","rural"),function(nm)!is.null(raw[[nm]]),logical(1))))
+ initialise_trend_round<-function(round_id){
+   trend_round_data[[round_id]]<-setNames(vector("list",length(trend_sources)),trend_sources)
+   trend_round_state[[round_id]]<-list(validated=FALSE,message="Upload all four files for this round, then validate it.")
+   trend_round_joined[[round_id]]<-NULL
+ }
+ round_state_value<-function(round_id){
+   state<-trend_round_state[[round_id]]
+   if(is.null(state)) list(validated=FALSE,message="Upload all four files for this round, then validate it.") else state
+ }
+ set_round_state<-function(round_id,validated,message){
+   trend_round_state[[round_id]]<-list(validated=isTRUE(validated),message=message)
+ }
+ round_loaded_count<-function(round_id){
+   round_data<-trend_round_data[[round_id]]
+   if(is.null(round_data)) return(0L)
+   sum(vapply(trend_sources,function(source_name)!is.null(round_data[[source_name]]),logical(1)))
+ }
+ round_is_validated<-function(round_id) isTRUE(round_state_value(round_id)$validated)
+ round_label<-function(round_id){
+   position<-match(round_id,trend_round_ids())
+   fallback<-paste("Previous round",position)
+   label<-trimws(input[[trend_input_id(round_id,"label")]])
+   if(is.null(label) || !nzchar(label)) fallback else label
+ }
+ trend_round_labels<-reactive(vapply(trend_round_ids(),round_label,character(1)))
+ trend_ready<-reactive({
+   round_ids<-trend_round_ids()
+   length(round_ids)>0 && all(vapply(round_ids,round_is_validated,logical(1)))
+ })
+ register_trend_round<-function(round_id){
+   for(source_name in trend_sources) local({
+     this_source<-source_name
+     input_name<-trend_input_id(round_id,this_source)
+     observeEvent(input[[input_name]],{
+       upload<-input[[input_name]]
+       if(is.null(upload)) return()
+       parsed<-tryCatch(read_csv_clean(upload$datapath),error=function(e) e)
+       round_data<-trend_round_data[[round_id]]
+       if(inherits(parsed,"error")) {
+         round_data[[this_source]]<-NULL
+         trend_round_data[[round_id]]<-round_data
+         trend_round_joined[[round_id]]<-NULL
+         set_round_state(round_id,FALSE,paste0("Could not read the ",this_source," file: ",conditionMessage(parsed)))
+       } else {
+         round_data[[this_source]]<-parsed
+         trend_round_data[[round_id]]<-round_data
+         trend_round_joined[[round_id]]<-NULL
+         set_round_state(round_id,FALSE,"All four files for this round must be uploaded and validated before analysis.")
+       }
+     })
+   })
+   output[[trend_input_id(round_id,"status")]]<-renderUI({
+     round_data<-trend_round_data[[round_id]]
+     state<-round_state_value(round_id)
+     chips<-lapply(trend_sources,function(source_name){
+       ok<-!is.null(round_data[[source_name]])
+       tags$span(class=paste("trend-file-chip",if(ok) "ready" else ""),paste0(tools::toTitleCase(source_name),if(ok) " loaded" else " awaiting upload"))
+     })
+     msg_class<-if(isTRUE(state$validated)) "alert alert-success trend-status-note" else "help-note trend-status-note"
+     tags$div(tags$div(class="trend-file-status",chips),tags$div(class=msg_class,state$message))
+   })
+   observeEvent(input[[trend_input_id(round_id,"validate")]],{
+     set_round_state(round_id,FALSE,"Validating this round.")
+     if(core_loaded()!=5) {
+       set_round_state(round_id,FALSE,"First load the current-round household, members, children, women, and rural/urban files in the left sidebar.")
+       return()
+     }
+     if(round_loaded_count(round_id)!=length(trend_sources)) {
+       set_round_state(round_id,FALSE,"Upload all four survey files for this round before validation.")
+       return()
+     }
+     round_data<-trend_round_data[[round_id]]
+     required_by_file<-list(household=c("key","weights"),members="key",children="key",women="key")
+     missing_by_file<-vapply(trend_sources,function(source_name){
+       missing<-setdiff(required_by_file[[source_name]],names(round_data[[source_name]]))
+       if(length(missing)) paste0(tools::toTitleCase(source_name),": ",paste(missing,collapse=", ")) else ""
+     },character(1))
+     missing_by_file<-missing_by_file[nzchar(missing_by_file)]
+     if(length(missing_by_file)) {
+       set_round_state(round_id,FALSE,paste0("Validation could not continue. Missing required join/weight column(s): ",paste(missing_by_file,collapse="; "),"."))
+       return()
+     }
+     joined_round<-tryCatch(attach_trend_household_weights(round_data),error=function(e) e)
+     if(inherits(joined_round,"error")) {
+       set_round_state(round_id,FALSE,paste0("Validation could not continue. ",conditionMessage(joined_round)))
+       return()
+     }
+     trend_round_joined[[round_id]]<-joined_round
+     missing_rows<-attr(joined_round,"trend_weight_join")$missing_key_rows
+     missing_note<-paste0(" Records without key retain missing weights and are excluded: ",paste0(tools::toTitleCase(names(missing_rows))," ",missing_rows,collapse="; "),".")
+     set_round_state(round_id,TRUE,paste0("Round validated. Household weights were joined to the members, children, and women files using key.",missing_note))
+   })
+ }
+ initialise_trend_round("round_1")
+ register_trend_round("round_1")
+ session$onFlushed(function(){
+   insertUI(selector="#trend_rounds_container",where="beforeEnd",ui=trend_round_card("round_1",1))
+ },once=TRUE)
+ observeEvent(input$trend_add_round,{
+   next_position<-trend_round_counter()+1L
+   trend_round_counter(next_position)
+   round_id<-paste0("round_",next_position)
+   initialise_trend_round(round_id)
+   trend_round_ids(c(trend_round_ids(),round_id))
+   register_trend_round(round_id)
+   insertUI(selector="#trend_rounds_container",where="beforeEnd",ui=trend_round_card(round_id,next_position),immediate=TRUE)
+ })
+ output$trend_rounds_summary<-renderUI({
+   round_ids<-trend_round_ids()
+   validated<-sum(vapply(round_ids,round_is_validated,logical(1)))
+   if(validated==length(round_ids)) {
+     tags$div(class="alert alert-success trend-status-note",sprintf("%s previous round%s validated. Choose the trend analysis below.",validated,if(validated==1) " is" else "s are"))
+   } else {
+     tags$div(class="help-note trend-status-note",sprintf("%s of %s previous rounds validated. Validate every added round before choosing an analysis.",validated,length(round_ids)))
+   }
+ })
  observe({if(core_loaded()==5 && overview_step()==1) overview_step(2)})
  output$overview_step_status<-renderUI({
    labels<-c("Upload files","Choose analysis","Review results")
@@ -508,6 +742,146 @@ server <- function(input,output,session){
  prepared<-reactive({src<-selected_source_module();d<-raw[[src]];req(d);d<-standardize_data(d,rural_data(),wealth());
    if(src%in%c("household","members") && !is.null(raw$members) && "hhid"%in%names(d)){m<-standardize_data(raw$members,rural_data(),wealth()); if("sleep_here_last_night"%in%names(m)){p<-aggregate(yes(m$sleep_here_last_night),list(hhid=m$hhid),sum,na.rm=TRUE);names(p)<-c("hhid","de_facto_population");d$de_facto_population<-p$de_facto_population[match(d$hhid,p$hhid)]}}
    d})
+ trend_previous_data<-function(round_id){
+   req(round_is_validated(round_id))
+   datasets<-trend_round_joined[[round_id]]
+   req(datasets)
+   datasets
+ }
+ trend_wealth<-function(round_id){
+   h<-trend_previous_data(round_id)$household;req(h)
+   h<-standardize_data(h,rural_data())
+   h<-derive_wealth_index(h)
+   h[!duplicated(h$hhid),intersect(c("hhid","wealth_quintile","wealth_score","wealth_quintile_num"),names(h)),drop=FALSE]
+ }
+ prepare_trend_source<-function(store,src,wealth_data){
+   d<-store[[src]];req(d)
+   d<-standardize_data(d,rural_data(),wealth_data)
+   if(src%in%c("household","members") && !is.null(store$members) && "hhid"%in%names(d)){
+     m<-standardize_data(store$members,rural_data(),wealth_data)
+     if("sleep_here_last_night"%in%names(m)){
+       p<-aggregate(yes(m$sleep_here_last_night),list(hhid=m$hhid),sum,na.rm=TRUE)
+       names(p)<-c("hhid","de_facto_population")
+       d$de_facto_population<-p$de_facto_population[match(d$hhid,p$hhid)]
+     }
+   }
+   d
+ }
+ trend_selected_source<-reactive({req(input$trend_indicator);source_module_for_indicator(input$trend_indicator)})
+ trend_current_prepared<-reactive({prepare_trend_source(raw,trend_selected_source(),wealth())})
+ trend_previous_prepared<-function(round_id,source_module=trend_selected_source()){
+   prepare_trend_source(trend_previous_data(round_id),source_module,trend_wealth(round_id))
+ }
+ trend_group_choices<-reactive({
+   src<-trend_selected_source()
+   current_groups<-available_groups(trend_current_prepared(),src)
+   previous_groups<-lapply(trend_round_ids(),function(round_id) tryCatch(available_groups(trend_previous_prepared(round_id,src),src),error=function(e) character()))
+   usable_previous_groups<-Filter(length,previous_groups)
+   if(!length(usable_previous_groups)) return(setNames(character(),character()))
+   groups<-Reduce(intersect,c(list(current_groups),usable_previous_groups))
+   setNames(groups,gsub("_"," ",groups))
+ })
+ output$trend_selection_ui<-renderUI({
+   if(!trend_ready()) return(NULL)
+   tags$div(class="trend-selection-card",
+    tags$h4("Step 2. Choose the trend analysis"),
+    tags$p("Only cuts available in the comparable rounds are shown. A round that did not capture an indicator will be flagged as unavailable rather than used in the estimate."),
+    tags$div(class="trend-selection-grid",
+      selectInput("trend_module","Thematic area",setNames(names(module_labels),module_labels)),
+      uiOutput("trend_indicator_ui"),
+      uiOutput("trend_group_ui")
+    )
+   )
+ })
+ output$trend_indicator_ui<-renderUI({
+   req(input$trend_module)
+   x<-indicator_catalog[indicator_catalog$module==input$trend_module,]
+   selectInput("trend_indicator","Indicator",setNames(x$id,x$label))
+ })
+ output$trend_group_ui<-renderUI({
+   choices<-trend_group_choices()
+   validate(need(length(choices),"No common comparison cuts are available for this indicator."))
+   selectInput("trend_group","Compare by",choices)
+ })
+ trend_computation<-reactive({
+   req(trend_ready(),input$trend_indicator,input$trend_group)
+   round_ids<-trend_round_ids()
+   round_labels<-trend_round_labels()
+   if(anyDuplicated(c(round_labels,"Current round"))) return(list(data=NULL,error="Each previous round must have a unique label that is different from Current round.",skipped=character()))
+   previous_results<-list()
+   skipped<-character()
+   for(i in seq_along(round_ids)){
+     result<-tryCatch(compute_indicator(trend_previous_prepared(round_ids[[i]]),input$trend_indicator,input$trend_group),error=function(e) e)
+     if(inherits(result,"error")) {
+       skipped<-c(skipped,paste0(round_labels[[i]],": ",conditionMessage(result)))
+     } else {
+       result$Round<-round_labels[[i]]
+       previous_results[[length(previous_results)+1L]]<-result
+     }
+   }
+   if(!length(previous_results)) return(list(data=NULL,error="The selected indicator or cut is unavailable in every uploaded previous round.",skipped=skipped))
+   current<-tryCatch(compute_indicator(trend_current_prepared(),input$trend_indicator,input$trend_group),error=function(e) e)
+   if(inherits(current,"error")) return(list(data=NULL,error=conditionMessage(current),skipped=skipped))
+   current$Round<-"Current round"
+   list(data=do.call(rbind,c(previous_results,list(current))),error=NULL,skipped=skipped)
+ })
+ trend_result_long<-reactive({
+   z<-trend_computation()
+   validate(need(is.null(z$error),paste0("This indicator cannot yet be compared: ",z$error)))
+   z$data
+ })
+ output$trend_result_choice_ui<-renderUI({
+   d<-trend_result_long();opts<-unique(as.character(d$Result))
+   if(length(opts)<=1) return(tags$div(class="help-note",paste0("Result: ",opts[[1]])))
+   selectInput("trend_result_choice","Result or option to trend",opts)
+ })
+ output$trend_group_value_ui<-renderUI({
+   d<-trend_result_long();groups<-unique(as.character(d$Group))
+   if(identical(input$trend_group,"Overall")) return(tags$div(class="help-note","Showing the overall comparison."))
+   selectInput("trend_group_value","Group to plot",groups)
+ })
+ trend_chart_data<-reactive({
+   d<-trend_result_long()
+   result_choice<-input$trend_result_choice
+   if(is.null(result_choice) || !result_choice%in%as.character(d$Result)) result_choice<-as.character(d$Result)[1]
+   d<-d[as.character(d$Result)==result_choice,,drop=FALSE]
+   if(!identical(input$trend_group,"Overall")){
+     group_choice<-input$trend_group_value
+     if(is.null(group_choice) || !group_choice%in%as.character(d$Group)) group_choice<-as.character(d$Group)[1]
+     d<-d[as.character(d$Group)==group_choice,,drop=FALSE]
+   }
+   d$Round<-factor(as.character(d$Round),levels=c(trend_round_labels(),"Current round"))
+   d[order(d$Round),,drop=FALSE]
+ })
+ trend_comparison_table<-reactive({
+   d<-trend_result_long()
+   round_order<-c(trend_round_labels(),"Current round")
+   available_rounds<-round_order[round_order %in%as.character(d$Round)]
+   out<-NULL
+   for(round_name in available_rounds){
+     piece<-d[as.character(d$Round)==round_name,c("Group","Result","Estimate","Unweighted_N","Weighted_N"),drop=FALSE]
+     names(piece)[3:5]<-paste(round_name,c("estimate","unweighted N","weighted N"))
+     out<-if(is.null(out)) piece else merge(out,piece,by=c("Group","Result"),all=TRUE)
+   }
+   first_previous<-setdiff(available_rounds,"Current round")[1]
+   if(length(first_previous) && "Current round"%in%available_rounds){
+     change_name<-paste0("Change: Current round vs ",first_previous)
+     out[[change_name]]<-round(out[["Current round estimate"]]-out[[paste(first_previous,"estimate")]],1)
+   }
+   out
+ })
+ output$trend_results_ui<-renderUI({
+   if(!trend_ready()) return(NULL)
+   z<-trend_computation()
+   if(!is.null(z$error)) return(tags$div(class="alert alert-danger trend-status-note",paste0("Comparison unavailable: ",z$error,". Upload a compatible prior round or add its approved mapping before interpreting a trend.")))
+   tags$div(class="trend-results-card",
+    tags$div(class="trend-results-toolbar",tags$div(tags$h4("Step 3. Review the comparison"),tags$p("The chart shows one selected result and group for clarity; the table retains all available groups and options.")),tags$div(class="trend-results-actions",downloadButton("download_trend_chart","Download trend chart",class="btn-primary"),downloadButton("download_trend","Download trend table",class="btn-outline-secondary"))),
+    if(length(z$skipped)) tags$div(class="help-note trend-status-note",paste0("Unavailable previous round(s): ",paste(z$skipped,collapse="; "))),
+    tags$div(class="trend-chart-options",uiOutput("trend_result_choice_ui"),uiOutput("trend_group_value_ui")),
+    plotOutput("trend_chart",height="430px"),
+    DTOutput("trend_results")
+   )
+ })
  output$indicator_ui<-renderUI({x<-indicator_catalog[indicator_catalog$module==input$module,];selectInput("indicator","Indicator",setNames(x$id,x$label))})
  group_choices<-reactive({d<-prepared();src<-selected_source_module();groups<-available_groups(d,src);setNames(groups,gsub("_"," ",groups))})
  output$group_ui<-renderUI({selectInput("group","Disaggregate by",group_choices())})
@@ -553,6 +927,16 @@ server <- function(input,output,session){
  output$result_title<-renderText(indicator_catalog$label[match(input$indicator,indicator_catalog$id)])
  output$results<-renderDT({datatable(result(),rownames=FALSE,options=list(scrollX=TRUE,pageLength=10,dom="tip"),class="compact stripe hover")})
  output$chart<-renderPlot({make_indicator_plot(chart_data(),indicator_catalog$label[match(input$indicator,indicator_catalog$id)],input$group,input$indicator)})
+ trend_plot<-reactive({
+   d<-trend_chart_data()
+   label<-indicator_catalog$label[match(input$trend_indicator,indicator_catalog$id)]
+   selected_group<-if(identical(input$trend_group,"Overall")) "Overall" else as.character(d$Group)[1]
+   make_trend_plot(d,paste0(label," — ",selected_group))
+ })
+ output$trend_chart<-renderPlot(trend_plot())
+ output$trend_results<-renderDT({
+   datatable(trend_comparison_table(),rownames=FALSE,options=list(scrollX=TRUE,pageLength=12,dom="tip"),class="compact stripe hover")
+ })
  output$map_controls<-renderUI({
    d <- chart_data()
    if (!identical(input$group,"lga")) return(tags$div(class="help-note","Select lga as the disaggregation to view the map."))
@@ -595,6 +979,14 @@ server <- function(input,output,session){
  output$dictionary<-renderDT({req(input$questionnaire);d<-readxl::read_excel(input$questionnaire$datapath,sheet="survey");names(d)<-clean_names(names(d));keep<-intersect(c("type","name","label_english_en","label_hausa_ha","relevant","required"),names(d));datatable(head(d[,keep,drop=FALSE],500),rownames=FALSE,options=list(pageLength=12,scrollX=TRUE),class="compact stripe hover")})
  output$download<-downloadHandler(filename=function()paste0(input$indicator,"_by_",input$group,".csv"),content=function(f)write.csv(result(),f,row.names=FALSE,na=""))
  output$download_chart<-downloadHandler(filename=function()paste0(input$indicator,"_by_",input$group,".png"),content=function(f)ggsave(f,plot=make_indicator_plot(chart_data(),indicator_catalog$label[match(input$indicator,indicator_catalog$id)],input$group,input$indicator),width=11,height=7,dpi=150))
+ output$download_trend_chart<-downloadHandler(
+   filename=function()paste0("kaduna_",input$trend_indicator,"_multi_round_trend.png"),
+   content=function(f)ggsave(f,plot=trend_plot(),width=11,height=6.5,units="in",dpi=300)
+ )
+ output$download_trend<-downloadHandler(
+   filename=function()paste0("kaduna_",input$trend_indicator,"_multi_round_trend.csv"),
+   content=function(f)write.csv(trend_comparison_table(),f,row.names=FALSE,na="")
+ )
  output$download_map_png<-downloadHandler(
    filename=function()paste0("kaduna_",input$indicator,"_lga_map.png"),
    content=function(f){x<-map_shape_data();ggsave(f,plot=make_lga_map_plot(x$shp,x$title,x$is_mean),width=10,height=8,units="in",dpi=300)}

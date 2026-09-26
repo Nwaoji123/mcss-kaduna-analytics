@@ -1,6 +1,6 @@
 # MCSS Survey Analytical Tool
 
-Current build: Version 48.
+Current build: Version 52.
 
 This Shiny application analyzes the shared current-round MCSS files:
 
@@ -11,13 +11,15 @@ This Shiny application analyzes the shared current-round MCSS files:
 - `KD_rural_urban.csv`
 - the XLSForm questionnaire (optional, for the data dictionary)
 
-It includes the current-round indicator families in the supplied R script. Round-one/2025 comparisons requiring unshared files are intentionally excluded. Indicators are organized into four user-facing groups: housing/household/respondent characteristics, malaria prevention, health seeking behavior and treatment, and malaria beliefs/exposure to malaria messages. Each indicator still uses its correct underlying source file.
+It includes the current-round indicator families in the supplied R script. Indicators are organized into four user-facing groups: housing/household/respondent characteristics, malaria prevention, health seeking behavior and treatment, and malaria beliefs/exposure to malaria messages. Each indicator still uses its correct underlying source file.
 
 Across all indicator groups, tables with multiple response options or categories are displayed in wide format. Response options/categories labelled `Missing` are suppressed from displayed and downloaded result tables. The headline ANC indicator includes ANC reported for either a recent live birth or a current pregnancy, as captured by `receive_anc`. Detailed ANC and IPTp indicators remain restricted to women reporting a live birth in the last two years. ANC visits are grouped as One, Two, Three, and Four or more.
 
 The app uses a polished native Shiny/Bslib interface with a collapsible vertical left control drawer for file upload, data files, thematic area, indicator, and disaggregation controls. The main canvas remains wide for results, with sticky output navigation, compact indicator context chips, searchable/sortable result tables, and chart/map views. The Chart tab automatically creates a visual for the selected indicator and disaggregation. It uses pie/donut-style charts only for small overall mutually exclusive categorical distributions; eligible mutually exclusive categorical indicators with disaggregation cuts use 100% stacked bars. Multiple-response indicators use grouped or faceted bars because their options can sum to more than 100%. All pies and bars are labelled with their values, and charts can be downloaded as PNG files. Chart subtitles are intentionally suppressed for a cleaner presentation view.
 
-The Map view uses Kaduna LGA boundaries from the bundled Nigeria LGA GeoJSON file and a key-free OpenStreetMap background. It works when `lga` is selected as the disaggregation. For multi-option or categorical indicators, choose the option/category to map. Percentage indicators use Low `0–39.9%` (red), Medium `40–69.9%` (yellow), and High `70–100%` (green); mean indicators use Low/Medium/High tertiles across LGAs. No-data/unmatched LGAs are grey. The selected LGA map can be exported as a clean PNG image or PDF without a web-map background.
+The Map view uses Kaduna LGA boundaries from the bundled Nigeria LGA GeoJSON file and a key-free OpenStreetMap background. It works when `lga` is selected as the disaggregation. For multi-option or categorical indicators, choose the option/category to map. Percentage indicators use Low `0–39.9%` (red), Medium `40–69.9%` (yellow), and High `70–100%` (green); mean indicators use Low/Medium/High tertiles across LGAs. No-data/unmatched LGAs are grey. The selected LGA map can be exported as a clean PNG image or PDF with LGA names and estimates, without a web-map background.
+
+The Trends tab compares the current round with one or more user-uploaded previous rounds. Add a card for each round, enter a meaningful label, upload its household, members, women, and children CSV files, and validate it. The rural/urban classification already loaded for the current round is reused for every selected round. For the 2025 Kaduna files, household weights are joined to the members, women, and children files with the shared SurveyCTO `key` field. This field is unique in the household file, unlike `hhid`; records without a `key` retain a missing weight and are excluded from weighted estimates. The app produces a labelled multi-round chart, downloadable PNG chart image, and downloadable comparison table. The current release expects each previous round to use the same standardized indicator fields as the current Kaduna questionnaire. A round with different question wording or column headings needs an approved mapping before its trend estimates can be interpreted.
 
 The app automatically derives the household wealth index from the housing, water, sanitation, livestock and asset variables using principal component analysis. It creates five wealth quintiles and joins them to the members, women and children files by `hhid`, enabling wealth-quintile disaggregation across the analysis.
 
@@ -43,6 +45,7 @@ RStudio users can instead open `app.R` and click **Run App**.
 - CSV download of the current result.
 - Automatic chart view with PNG download.
 - LGA map view with Low/Medium/High colour classes.
+- User-labelled, multi-round upload and validation; a multi-round comparison chart with PNG download; and a downloadable trend table.
 - An optional questionnaire dictionary displayed within the Help tab.
 - Required-column checks and plain-language usage instructions.
 
