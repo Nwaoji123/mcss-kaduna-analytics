@@ -86,6 +86,10 @@ indicator_catalog <- data.frame(
 )
 
 indicator_catalog$source_module <- indicator_catalog$module
+# These two indicators use their dedicated respondent files rather than the
+# household-member roster, so their eligibility variables remain available.
+indicator_catalog$source_module[indicator_catalog$id=="u5_slept_itn"] <- "children"
+indicator_catalog$source_module[indicator_catalog$id=="pregnant_slept_itn"] <- "women"
 
 bucket_map <- list(
   characteristics=c(
@@ -176,8 +180,14 @@ apply_eligibility <- function(d, id) {
   eq <- function(v,val) if (v %in% names(d)) !is.na(d[[v]]) & d[[v]]==val else rep(FALSE,nrow(d))
   if (id=="net_source") keep <- eq("hh_have_nets","Yes")
   if (id=="net_nonuse_reasons") keep <- eq("hh_have_nets","Yes") & eq("sleep_under_net","No")
-  if (id=="slept_itn") keep <- eq("sleep_here_last_night","Yes")
-  if (id=="u5_slept_itn") keep <- (if("child_u5" %in% names(d)) num(d$child_u5)==1 else FALSE)
+  if (id=="slept_itn") {
+    # Earlier rounds may contain only a household count of people who slept
+    # under an ITN. In that case, the app supplies de_facto_population from
+    # the members file and missing household counts represent zero sleepers.
+    if (all(c("num_slept_under_net","de_facto_population") %in% names(d))) keep <- rep(TRUE,nrow(d))
+    else keep <- eq("sleep_here_last_night","Yes")
+  }
+  if (id=="u5_slept_itn") keep <- (if("child_u5" %in% names(d)) num(d$child_u5)==1 else rep(TRUE,nrow(d)))
   if (id=="pregnant_slept_itn") keep <- eq("pregnancy","Yes")
   if (id %in% c("fever_tested","sought_treatment","treatment_place","took_medicine")) keep <- eq("child_ill","Yes")
   if (id=="treatment_place") keep <- keep & eq("seek_treatment","Yes")
@@ -209,6 +219,9 @@ indicator_spec <- function(d,id) {
     message_sources=c("msg_heard_seenanywhereelse","msg_heard_seencommunityeventoutr","msg_heard_seencommunityhealthwor","msg_heard_seenposterbillboard","msg_heard_seenradio","msg_heard_seentelevision"),
     prevention_methods=c("malaria_preventionavoid_stagnant","malaria_preventiondont_know","malaria_preventionkeep_surroundi","malaria_preventionothers","malaria_preventionput_mosquito_s","malaria_preventionsleep_inside_a","malaria_preventionspray_house_wi","malaria_preventiontake_preventat","malaria_preventionuse_mosquito_r")
   )
+  if (id=="slept_itn" && all(c("num_slept_under_net","de_facto_population") %in% names(d))) {
+    return(list(kind="household_count_ratio",vars=c("num_slept_under_net","de_facto_population")))
+  }
   if (id=="tested_by_source") return(list(kind="binary_by_category",vars=c("blood_taken","treatment_place")))
   if (id=="member_age_sex") return(list(kind="age_sex",vars=c("age_group","hh_mem_gender")))
   if (id %in% names(binary)) return(list(kind="binary",vars=binary[[id]]))
@@ -274,7 +287,7 @@ collapse_top_categories <- function(x,w,top_n=4) {
   if (!length(totals)) return(x)
   keep <- names(sort(totals,decreasing=TRUE))[seq_len(min(top_n,length(totals)))]
   x[!missing & !x %in% keep] <- "Other"
-  factor(x,levels=c(keep,if(any(x=="Other",na.rm=TRUE)) "Other"))
+  factor(x,levels=unique(c(keep,if(any(x=="Other",na.rm=TRUE)) "Other")))
 }
 
 compute_member_age_sex <- function(d,group) {
@@ -331,6 +344,18 @@ compute_indicator <- function(d,id,group) {
     if ("hhid" %in% names(d)) d <- d[!duplicated(d$hhid),,drop=FALSE]
     nets<-num(d$num_nets); pop<-num(d$de_facto_population); access<-pmin(ifelse(is.na(nets),0,nets)*2,pop); w<-valid_w(d); g<-if(group=="Overall") rep("Overall",nrow(d)) else as.character(d[[group]]); idx<-split(seq_len(nrow(d)),g)
     return(do.call(rbind,lapply(names(idx),function(nm){i<-idx[[nm]];ok<-is.finite(pop[i])&pop[i]>0&is.finite(w[i]);den<-sum(w[i][ok]*pop[i][ok]);data.frame(Group=nm,Result="ITN access",Estimate=round(100*sum(w[i][ok]*access[i][ok])/den,1),Unweighted_N=sum(ok),Weighted_N=round(den,1))})))
+  }
+  if(spec$kind=="household_count_ratio") {
+    if ("hhid" %in% names(d)) d <- d[!duplicated(d$hhid),,drop=FALSE]
+    slept<-num(d$num_slept_under_net); slept[!is.finite(slept)]<-0
+    pop<-num(d$de_facto_population); w<-valid_w(d)
+    g<-if(group=="Overall") rep("Overall",nrow(d)) else as.character(d[[group]])
+    g[is.na(g)|g==""] <- "Missing"
+    idx<-split(seq_len(nrow(d)),g)
+    return(do.call(rbind,lapply(names(idx),function(nm){
+      i<-idx[[nm]]; ok<-is.finite(pop[i])&pop[i]>0&is.finite(w[i]); den<-sum(w[i][ok]*pop[i][ok])
+      data.frame(Group=nm,Result="Proportion Yes",Estimate=round(100*sum(w[i][ok]*slept[i][ok])/den,1),Unweighted_N=sum(ok),Weighted_N=round(den,1),stringsAsFactors=FALSE)
+    })))
   }
   if(spec$kind=="ideation") {
     domains<-list("Susceptibility/Risk"=tolower(d$worry_malaria)=="agree"|tolower(d$pple_get_malaria_during_rainy)=="disagree","Severe malaria"=tolower(d$malaria_can_be_treated)=="disagree"|tolower(d$weak_child_can_die_frommalaria)=="disagree","Self-efficacy"=tolower(d$sleep_entire_night_lots)=="agree"|tolower(d$sleep_entire_night_few)=="agree","Malaria-related behaviour"=tolower(d$donotlike_sleep_inside)=="disagree"|tolower(d$best_start_taking_medicine_at_ho)=="disagree"|tolower(d$full_dose_medicine)=="agree","Community norms"=tolower(d$take_healthcare_provider)=="agree"|tolower(d$comm_sleep_inside_net)=="agree")

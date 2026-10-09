@@ -1,6 +1,6 @@
 # MCSS Survey Analytical Tool
 
-Current build: Version 55.
+Current build: Version 64.
 
 This Shiny application analyzes the shared current-round MCSS files:
 
@@ -8,6 +8,7 @@ This Shiny application analyzes the shared current-round MCSS files:
 - `MCSS_KD_MEMBERS_MERGED.csv`
 - `MCSS_KD_WOMEN_MERGED.csv`
 - `MCSS_KD_CHILDREN_MERGED.csv`
+- `MCSS_KD_SLEPT_UNDERNET_MERGED.csv` (needed for the ITN-use indicators)
 - `KD_rural_urban.csv`
 - the XLSForm questionnaire (optional, for the data dictionary)
 
@@ -21,7 +22,9 @@ The Map view uses Kaduna LGA boundaries from the bundled Nigeria LGA GeoJSON fil
 
 The same household-weight workflow runs throughout the app, for both current and previous rounds. The household file may provide either `weight` or `weights`; the app standardises this internally, then identifies a safe shared household key (preferring `key`, then `instanceid`, `hhid`, or `unique`) that is unique in the household file and matches all non-missing records in the members, women, and children files. It retains valid existing weights, fills missing or absent weights from the household file, and excludes records with a missing join key from weighted estimates. Unsafe joins, such as duplicate household keys or unmatched records, are blocked with a plain-language error.
 
-The Trends tab compares the current round with one or more user-uploaded previous rounds. Add a card for each round, enter a meaningful label, upload its household, members, women, and children CSV files, and validate it. The rural/urban classification already loaded for the current round is reused for every selected round. The app produces a labelled multi-round chart, downloadable PNG chart image, and downloadable comparison table. The current release expects each previous round to use the same standardized indicator fields as the current Kaduna questionnaire. A round with different question wording or column headings needs an approved mapping before its trend estimates can be interpreted.
+For the overall indicator “De-facto household members who slept under an ITN,” the app uses person-level ITN-use records where they are available. For Round 1, which has no safe person-level ITN roster, it instead uses the household-reported `num_slept_under_net` count, treating blank counts as zero, over the weighted de-facto population derived from members present the previous night. This fallback is limited to the overall de-facto member indicator; under-five and pregnant-woman ITN-use indicators remain unavailable (`NA`) when the required person-level information is absent.
+
+The Trends tab compares the current round with one or more user-uploaded previous rounds. Add a card for each round, enter a meaningful label, upload its household, members, women, and children CSV files, and validate it. The person-level people-who-slept-under-an-ITN roster is optional for each previous round, but should be uploaded when an ITN-use indicator needs it. The rural/urban classification already loaded for the current round is reused for every selected round. The app sorts labelled previous rounds from oldest to newest—using a four-digit year in the label when available, otherwise the stated Round number—and places Current round last. It plots every available estimate; a round that did not capture the selected indicator remains on the x-axis with an `NA` value and a broken line, alongside a concise explanation. The Trends tab is chart-only, with a PNG download for the selected chart.
 
 The app automatically derives the household wealth index from the housing, water, sanitation, livestock and asset variables using principal component analysis. It creates five wealth quintiles and joins them to the members, women and children files by `hhid`, enabling wealth-quintile disaggregation across the analysis.
 
@@ -47,7 +50,7 @@ RStudio users can instead open `app.R` and click **Run App**.
 - CSV download of the current result.
 - Automatic chart view with PNG download.
 - LGA map view with Low/Medium/High colour classes.
-- User-labelled, multi-round upload and validation; a multi-round comparison chart with PNG download; and a downloadable trend table.
+- User-labelled, multi-round upload and validation; a multi-round comparison chart with PNG download.
 - An optional questionnaire dictionary displayed within the Help tab.
 - Required-column checks and plain-language usage instructions.
 
