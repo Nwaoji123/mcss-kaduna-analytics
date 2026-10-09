@@ -239,6 +239,41 @@ attach_household_weights <- function(datasets) {
   datasets
 }
 
+attach_women_roster_age <- function(datasets) {
+  women <- datasets$women
+  members <- datasets$members
+  if (is.null(women) || is.null(members) || !"hhid" %in% names(women) || !"hhid" %in% names(members)) return(datasets)
+
+  woman_line_column <- intersect(c("woman_age_1549_id"),names(women))[1]
+  member_line_column <- intersect(c("line_number_member"),names(members))[1]
+  member_age_column <- intersect(c("age_diff","hh_mem_age"),names(members))[1]
+  if (is.na(woman_line_column) || is.na(member_line_column) || is.na(member_age_column)) return(datasets)
+
+  roster_key <- function(household_id,line_id) {
+    line_id <- clean_names(as.character(line_id))
+    line_id[is.na(line_id) | line_id==""] <- NA_character_
+    household_id <- normalise_unique_key(household_id)
+    ifelse(is.na(household_id) | is.na(line_id),NA_character_,paste(household_id,line_id,sep="|"))
+  }
+  member_roster_key <- roster_key(members$hhid,members[[member_line_column]])
+  woman_roster_key <- roster_key(women$hhid,women[[woman_line_column]])
+  usable_member_key <- !is.na(member_roster_key)
+  usable_woman_key <- !is.na(woman_roster_key)
+  if (!any(usable_member_key) || anyDuplicated(member_roster_key[usable_member_key]) ||
+      !all(woman_roster_key[usable_woman_key] %in% member_roster_key[usable_member_key])) return(datasets)
+
+  matched_member <- match(woman_roster_key,member_roster_key)
+  roster_age <- members[[member_age_column]][matched_member]
+  if (!"age_diff" %in% names(women)) {
+    women$age_diff <- roster_age
+  } else {
+    existing_age <- suppressWarnings(as.numeric(women$age_diff))
+    women$age_diff[!is.finite(existing_age)] <- roster_age[!is.finite(existing_age)]
+  }
+  datasets$women <- women
+  datasets
+}
+
 status_badge <- function(ok,label) {
   cls <- if (isTRUE(ok)) "file-ok" else "file-missing"
   mark <- if (isTRUE(ok)) "OK" else "—"
@@ -579,7 +614,7 @@ ui <- fluidPage(
       )
      )
     ),
-    tags$div(class="footer-note","MCSS Analytical Tool | Current-round analysis and trends | Version 54")
+    tags$div(class="footer-note","MCSS Analytical Tool | Current-round analysis and trends | Version 55")
    ),
    tags$footer(class="app-footer",tags$span("Powered by"),tags$strong("SCIDaR"))
   )
@@ -607,7 +642,7 @@ server <- function(input,output,session){
  current_joined_data<-reactive({
    req(core_loaded()==5)
    current_sources<-setNames(lapply(trend_sources,function(source_name) raw[[source_name]]),trend_sources)
-   joined<-tryCatch(attach_household_weights(current_sources),error=function(e) e)
+   joined<-tryCatch(attach_women_roster_age(attach_household_weights(current_sources)),error=function(e) e)
    validate(need(!inherits(joined,"error"),paste0("Current-round weight validation could not continue. ",if(inherits(joined,"error")) conditionMessage(joined) else "")))
    joined
  })
@@ -683,17 +718,7 @@ server <- function(input,output,session){
        return()
      }
      round_data<-trend_round_data[[round_id]]
-     required_by_file<-list(household=c("key","weights"),members="key",children="key",women="key")
-     missing_by_file<-vapply(trend_sources,function(source_name){
-       missing<-setdiff(required_by_file[[source_name]],names(round_data[[source_name]]))
-       if(length(missing)) paste0(tools::toTitleCase(source_name),": ",paste(missing,collapse=", ")) else ""
-     },character(1))
-     missing_by_file<-missing_by_file[nzchar(missing_by_file)]
-     if(length(missing_by_file)) {
-       set_round_state(round_id,FALSE,paste0("Validation could not continue. Missing required join/weight column(s): ",paste(missing_by_file,collapse="; "),"."))
-       return()
-     }
-     joined_round<-tryCatch(attach_household_weights(round_data),error=function(e) e)
+     joined_round<-tryCatch(attach_women_roster_age(attach_household_weights(round_data)),error=function(e) e)
      if(inherits(joined_round,"error")) {
        set_round_state(round_id,FALSE,paste0("Validation could not continue. ",conditionMessage(joined_round)))
        return()

@@ -135,6 +135,11 @@ top_four_characteristic_indicators <- c(
 
 standardize_data <- function(d, rural=NULL, wealth=NULL) {
   names(d) <- clean_names(names(d))
+  # Round 3 records the Bed bugs response under an unlabelled XLSForm field.
+  # Use the same canonical field as earlier rounds when the named field is absent.
+  if (!"reason_net_wasnt_used_membed_bug" %in% names(d) && "v84" %in% names(d)) {
+    d$reason_net_wasnt_used_membed_bug <- d$v84
+  }
   if ("lga" %in% names(d)) d$lga <- tolower(trimws(d$lga))
   rural_cols <- c("urban_rural_classification","urban_rural_classification_x","urban_rural_classification_y")
   existing <- rural_cols[rural_cols %in% names(d)]
