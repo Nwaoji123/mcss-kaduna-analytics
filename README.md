@@ -1,6 +1,6 @@
 # MCSS Survey Analytical Tool
 
-Current build: Version 52.
+Current build: Version 54.
 
 This Shiny application analyzes the shared current-round MCSS files:
 
@@ -19,7 +19,9 @@ The app uses a polished native Shiny/Bslib interface with a collapsible vertical
 
 The Map view uses Kaduna LGA boundaries from the bundled Nigeria LGA GeoJSON file and a key-free OpenStreetMap background. It works when `lga` is selected as the disaggregation. For multi-option or categorical indicators, choose the option/category to map. Percentage indicators use Low `0–39.9%` (red), Medium `40–69.9%` (yellow), and High `70–100%` (green); mean indicators use Low/Medium/High tertiles across LGAs. No-data/unmatched LGAs are grey. The selected LGA map can be exported as a clean PNG image or PDF with LGA names and estimates, without a web-map background.
 
-The Trends tab compares the current round with one or more user-uploaded previous rounds. Add a card for each round, enter a meaningful label, upload its household, members, women, and children CSV files, and validate it. The rural/urban classification already loaded for the current round is reused for every selected round. For the 2025 Kaduna files, household weights are joined to the members, women, and children files with the shared SurveyCTO `key` field. This field is unique in the household file, unlike `hhid`; records without a `key` retain a missing weight and are excluded from weighted estimates. The app produces a labelled multi-round chart, downloadable PNG chart image, and downloadable comparison table. The current release expects each previous round to use the same standardized indicator fields as the current Kaduna questionnaire. A round with different question wording or column headings needs an approved mapping before its trend estimates can be interpreted.
+The same household-weight workflow runs throughout the app, for both current and previous rounds. The household file may provide either `weight` or `weights`; the app standardises this internally, then identifies a safe shared household key (preferring `key`, then `instanceid`, `hhid`, or `unique`) that is unique in the household file and matches all non-missing records in the members, women, and children files. It retains valid existing weights, fills missing or absent weights from the household file, and excludes records with a missing join key from weighted estimates. Unsafe joins, such as duplicate household keys or unmatched records, are blocked with a plain-language error.
+
+The Trends tab compares the current round with one or more user-uploaded previous rounds. Add a card for each round, enter a meaningful label, upload its household, members, women, and children CSV files, and validate it. The rural/urban classification already loaded for the current round is reused for every selected round. The app produces a labelled multi-round chart, downloadable PNG chart image, and downloadable comparison table. The current release expects each previous round to use the same standardized indicator fields as the current Kaduna questionnaire. A round with different question wording or column headings needs an approved mapping before its trend estimates can be interpreted.
 
 The app automatically derives the household wealth index from the housing, water, sanitation, livestock and asset variables using principal component analysis. It creates five wealth quintiles and joins them to the members, women and children files by `hhid`, enabling wealth-quintile disaggregation across the analysis.
 

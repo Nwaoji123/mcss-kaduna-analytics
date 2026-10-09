@@ -176,40 +176,66 @@ normalise_unique_key <- function(x) {
   key
 }
 
-attach_trend_household_weights <- function(datasets) {
+attach_household_weights <- function(datasets) {
   household <- datasets$household
-  if (is.null(household) || !"key" %in% names(household) || !"weights" %in% names(household)) {
-    stop("The previous-round household file must contain both key and weights.",call.=FALSE)
+  household_weight_column <- intersect(c("weights","weight"),names(household))[1]
+  if (is.null(household) || is.na(household_weight_column)) {
+    stop("The household file must contain a weight or weights column.",call.=FALSE)
   }
-  household$key <- normalise_unique_key(household$key)
-  valid_household_key <- !is.na(household$key)
-  if (!all(valid_household_key)) {
-    stop("The previous-round household file has missing key values, so household weights cannot be joined safely.",call.=FALSE)
+  household$weights <- household[[household_weight_column]]
+  source_names <- c("members","children","women")
+  key_candidates <- c("key","instanceid","hhid","unique")
+  join_key <- NULL
+  for (candidate in key_candidates) {
+    if (!candidate %in% names(household)) next
+    household_key <- normalise_unique_key(household[[candidate]])
+    if (anyNA(household_key) || anyDuplicated(household_key)) next
+    matches_all_sources <- all(vapply(source_names,function(source_name){
+      d <- datasets[[source_name]]
+      if (is.null(d) || !candidate %in% names(d)) return(FALSE)
+      source_key <- normalise_unique_key(d[[candidate]])
+      all(is.na(source_key) | source_key %in% household_key)
+    },logical(1)))
+    if (matches_all_sources) {
+      join_key <- candidate
+      break
+    }
   }
-  if (anyDuplicated(household$key)) {
-    stop("The previous-round household file has duplicate key values, so household weights cannot be joined safely.",call.=FALSE)
+  if (is.null(join_key)) {
+    stop("No safe shared household key was found. The app looked for key, instanceid, hhid and unique, but could not find one that is unique in the household file and matches every non-missing record in the other files.",call.=FALSE)
   }
-  household$hhid <- household$key
+  household[[join_key]] <- normalise_unique_key(household[[join_key]])
+  household$hhid <- household[[join_key]]
   datasets$household <- household
-  missing_key_rows <- integer(3)
-  names(missing_key_rows) <- c("members","children","women")
-  for (source_name in c("members","children","women")) {
+  missing_key_rows <- integer(length(source_names))
+  names(missing_key_rows) <- source_names
+  joined_weight_rows <- integer(length(source_names))
+  names(joined_weight_rows) <- source_names
+  for (source_name in source_names) {
     d <- datasets[[source_name]]
-    if (is.null(d) || !"key" %in% names(d)) {
-      stop(paste0("The previous-round ",source_name," file must contain key to receive the household weight."),call.=FALSE)
-    }
-    d$key <- normalise_unique_key(d$key)
-    matched_household <- match(d$key,household$key)
-    unmatched <- !is.na(d$key) & is.na(matched_household)
+    d[[join_key]] <- normalise_unique_key(d[[join_key]])
+    matched_household <- match(d[[join_key]],household[[join_key]])
+    unmatched <- !is.na(d[[join_key]]) & is.na(matched_household)
     if (any(unmatched)) {
-      stop(paste0("The previous-round ",source_name," file contains key value(s) that do not match the household file."),call.=FALSE)
+      stop(paste0("The ",source_name," file contains ",join_key," value(s) that do not match the household file."),call.=FALSE)
     }
-    missing_key_rows[[source_name]] <- sum(is.na(d$key))
-    d$weights <- household$weights[matched_household]
+    missing_key_rows[[source_name]] <- sum(is.na(d[[join_key]]))
+    household_weights <- household$weights[matched_household]
+    source_weight_column <- intersect(c("weights","weight"),names(d))[1]
+    if (is.na(source_weight_column)) {
+      d$weights <- household_weights
+      joined_weight_rows[[source_name]] <- sum(!is.na(household_weights))
+    } else {
+      d$weights <- d[[source_weight_column]]
+      numeric_weights <- suppressWarnings(as.numeric(d$weights))
+      missing_weights <- !is.finite(numeric_weights) | numeric_weights < 0
+      d$weights[missing_weights] <- household_weights[missing_weights]
+      joined_weight_rows[[source_name]] <- sum(missing_weights & !is.na(household_weights))
+    }
     d$hhid <- household$hhid[matched_household]
     datasets[[source_name]] <- d
   }
-  attr(datasets,"trend_weight_join") <- list(key="key",missing_key_rows=missing_key_rows)
+  attr(datasets,"household_weight_join") <- list(key=join_key,missing_key_rows=missing_key_rows,joined_weight_rows=joined_weight_rows)
   datasets
 }
 
@@ -234,7 +260,7 @@ trend_round_card <- function(round_id, position) {
       fileInput(trend_input_id(round_id,"women"),"Women CSV",accept=".csv")
     ),
     tags$div(class="trend-validation-row",
-      tags$small("The household file must contain weights. The shared SurveyCTO key safely supplies those weights to the members, children and women files."),
+      tags$small("The household file must contain weight or weights. A verified shared household key safely supplies weights to the members, children and women files."),
       actionButton(trend_input_id(round_id,"validate"),"Validate this round",class="btn-primary")
     ),
     uiOutput(trend_input_id(round_id,"status"))
@@ -553,7 +579,7 @@ ui <- fluidPage(
       )
      )
     ),
-    tags$div(class="footer-note","MCSS Analytical Tool | Current-round analysis and trends | Version 52")
+    tags$div(class="footer-note","MCSS Analytical Tool | Current-round analysis and trends | Version 54")
    ),
    tags$footer(class="app-footer",tags$span("Powered by"),tags$strong("SCIDaR"))
   )
@@ -578,6 +604,13 @@ server <- function(input,output,session){
  observeEvent(input$overview_open_table,updateTabsetPanel(session,"main_tabs",selected="Table"))
  lapply(c("household","members","children","women","rural"),function(nm) observeEvent(input[[nm]],{raw[[nm]]<-read_csv_clean(input[[nm]]$datapath)}))
  core_loaded<-reactive(sum(vapply(c("household","members","children","women","rural"),function(nm)!is.null(raw[[nm]]),logical(1))))
+ current_joined_data<-reactive({
+   req(core_loaded()==5)
+   current_sources<-setNames(lapply(trend_sources,function(source_name) raw[[source_name]]),trend_sources)
+   joined<-tryCatch(attach_household_weights(current_sources),error=function(e) e)
+   validate(need(!inherits(joined,"error"),paste0("Current-round weight validation could not continue. ",if(inherits(joined,"error")) conditionMessage(joined) else "")))
+   joined
+ })
  initialise_trend_round<-function(round_id){
    trend_round_data[[round_id]]<-setNames(vector("list",length(trend_sources)),trend_sources)
    trend_round_state[[round_id]]<-list(validated=FALSE,message="Upload all four files for this round, then validate it.")
@@ -660,15 +693,16 @@ server <- function(input,output,session){
        set_round_state(round_id,FALSE,paste0("Validation could not continue. Missing required join/weight column(s): ",paste(missing_by_file,collapse="; "),"."))
        return()
      }
-     joined_round<-tryCatch(attach_trend_household_weights(round_data),error=function(e) e)
+     joined_round<-tryCatch(attach_household_weights(round_data),error=function(e) e)
      if(inherits(joined_round,"error")) {
        set_round_state(round_id,FALSE,paste0("Validation could not continue. ",conditionMessage(joined_round)))
        return()
      }
      trend_round_joined[[round_id]]<-joined_round
-     missing_rows<-attr(joined_round,"trend_weight_join")$missing_key_rows
-     missing_note<-paste0(" Records without key retain missing weights and are excluded: ",paste0(tools::toTitleCase(names(missing_rows))," ",missing_rows,collapse="; "),".")
-     set_round_state(round_id,TRUE,paste0("Round validated. Household weights were joined to the members, children, and women files using key.",missing_note))
+     join_note<-attr(joined_round,"household_weight_join")
+     missing_rows<-join_note$missing_key_rows
+     missing_note<-paste0(" Records without ",join_note$key," retain missing weights and are excluded: ",paste0(tools::toTitleCase(names(missing_rows))," ",missing_rows,collapse="; "),".")
+     set_round_state(round_id,TRUE,paste0("Round validated. Household weights were joined to the members, children, and women files using ",join_note$key,".",missing_note))
    })
  }
  initialise_trend_round("round_1")
@@ -727,8 +761,7 @@ server <- function(input,output,session){
  })
  rural_data<-reactive({r<-raw$rural;if(is.null(r))return(NULL); names(r)<-clean_names(names(r));r$lga<-tolower(trimws(r$lga));r})
  wealth<-reactive({
-   h<-raw$household
-   if(is.null(h))return(NULL)
+   h<-current_joined_data()$household
    h<-standardize_data(h,rural_data())
    h<-derive_wealth_index(h)
    h[!duplicated(h$hhid),intersect(c("hhid","wealth_quintile","wealth_score","wealth_quintile_num"),names(h)),drop=FALSE]
@@ -739,8 +772,8 @@ server <- function(input,output,session){
    read_lga_boundaries(path)
  })
  selected_source_module<-reactive({req(input$indicator);source_module_for_indicator(input$indicator)})
- prepared<-reactive({src<-selected_source_module();d<-raw[[src]];req(d);d<-standardize_data(d,rural_data(),wealth());
-   if(src%in%c("household","members") && !is.null(raw$members) && "hhid"%in%names(d)){m<-standardize_data(raw$members,rural_data(),wealth()); if("sleep_here_last_night"%in%names(m)){p<-aggregate(yes(m$sleep_here_last_night),list(hhid=m$hhid),sum,na.rm=TRUE);names(p)<-c("hhid","de_facto_population");d$de_facto_population<-p$de_facto_population[match(d$hhid,p$hhid)]}}
+ prepared<-reactive({src<-selected_source_module();current_data<-current_joined_data();d<-current_data[[src]];req(d);d<-standardize_data(d,rural_data(),wealth());
+   if(src%in%c("household","members") && !is.null(current_data$members) && "hhid"%in%names(d)){m<-standardize_data(current_data$members,rural_data(),wealth()); if("sleep_here_last_night"%in%names(m)){p<-aggregate(yes(m$sleep_here_last_night),list(hhid=m$hhid),sum,na.rm=TRUE);names(p)<-c("hhid","de_facto_population");d$de_facto_population<-p$de_facto_population[match(d$hhid,p$hhid)]}}
    d})
  trend_previous_data<-function(round_id){
    req(round_is_validated(round_id))
